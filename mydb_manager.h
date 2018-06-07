@@ -19,9 +19,10 @@ extern char *optarg;
 #define REDEFINE_CPT -1
 #define MAXDATABUF 1024
 #define MAX_NAME_LEN 19
+#define MAX_MODEL_LEN 19
+#define SHADOW_UNKNOWN 1
 #define PRIMARY_DB	0
 #define SECONDARY_DB	1
-#define PRODUCT_CPT_NUM 4
 #define CPTDB "cptDB.db"
 #define PRODUCTDB	"productDB.db"
 #define PRODUCTNAMEDB	"product_nameDB.db"
@@ -41,7 +42,7 @@ typedef struct{
     char *cpt_db_name; 
     char *product_name_db_name; 
     char *cpt_name_db_name;   
-} DOM_DBS;
+} BOM_DBS;
 
 
 typedef struct subcpt_store{
@@ -51,11 +52,13 @@ typedef struct subcpt_store{
 
 typedef struct product_store{
     char name[MAX_NAME_LEN + 1];
-    SUBCPT_DATA subcpt[4];
+    unsigned int subcpt_num;
+    SUBCPT_DATA * subcpt;
 }PRODUCT_DATA;
 
 typedef struct cpt_store{
   char name[MAX_NAME_LEN + 1];
+  char model[MAX_MODEL_LEN +1];
   unsigned int subcpt_num;
   SUBCPT_DATA * subcpt;
 } CPT_DATA;
@@ -66,32 +69,34 @@ typedef struct component {
 	CPT_DATA data; 
 } CPT;
 
-
-
 typedef struct product{
 	KEY id;
 	PRODUCT_DATA data;
 } PRODUCT;
 
-int unit_test();   
 int	open_database(DB **, const char *, const char *, FILE *, int);
-int	databases_setup(DOM_DBS *, const char *, FILE *);
-int	databases_close(DOM_DBS *);
-void set_db_filenames(DOM_DBS *);
-void initialize_stockdbs(DOM_DBS *);
+int	databases_setup(BOM_DBS *, const char *, FILE *);
+int	databases_close(BOM_DBS *);
+void set_db_filenames(BOM_DBS *);
+void initialize_stockdbs(BOM_DBS *);
 
-int insert_products(DOM_DBS *,PRODUCT *);
-int insert_cpt(DOM_DBS *,CPT *);
+int insert_product(BOM_DBS *,PRODUCT *);
+int insert_cpt(BOM_DBS *,CPT *);
 
-int get_product_by_id(DOM_DBS *,PRODUCT *);
-int get_product_by_name(DOM_DBS *,PRODUCT *);
-int get_cpt_by_id(DOM_DBS *,CPT *,unsigned int *);
-int get_cpt_by_name(DOM_DBS *,CPT *,unsigned int *);
+int get_product_by_id(BOM_DBS *,PRODUCT *);
+int get_product_by_name(BOM_DBS *,PRODUCT *);
+int get_cpt_by_id(BOM_DBS *,CPT *,unsigned int *);
+int get_cpt_by_name(BOM_DBS *,CPT *,unsigned int *);
 
-int secure_remove_product(DOM_DBS *,KEY);
-int secure_remove_cpt(DOM_DBS *,KEY);
-void print_cpt(CPT * );
-void print_product(PRODUCT *);
+int secure_remove_product(BOM_DBS *,KEY);
+int secure_remove_cpt(BOM_DBS *,KEY);
 
+void print_cpt(BOM_DBS *,CPT *);
+void print_product(BOM_DBS *,PRODUCT *);
+void print_cpt_raw(CPT * );
+void print_product_raw(PRODUCT *);
+
+int print_products(BOM_DBS *,unsigned int limit);
+int print_cpts(BOM_DBS *,int flag,unsigned int limit);
 
 #endif

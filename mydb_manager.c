@@ -3,94 +3,17 @@
 
 #define ADD_REF 1
 #define RED_REF 2
-int _insert_products(DOM_DBS *,PRODUCT *);
-int _insert_cpt(DOM_DBS *,CPT *,unsigned int);
-int _remove_cpt(DOM_DBS *my_dom, KEY id);
-int _remove_product(DOM_DBS *my_dom, KEY id);
-int _modify_reference(DOM_DBS *my_dom, KEY id,unsigned int flags);
+int _insert_product(BOM_DBS *,PRODUCT *);
+int _insert_cpt(BOM_DBS *,CPT *,unsigned int);
+int _remove_cpt(BOM_DBS *my_bom, KEY id);
+int _remove_product(BOM_DBS *my_bom, KEY id);
+int _modify_reference(BOM_DBS *my_bom, KEY id,unsigned int flags);
 void pack_cpt(CPT_DATA *c_data,char * dataBuf,unsigned int *count);
-void _add_unknown_cpt(DOM_DBS *my_dom, KEY id,unsigned int count);
+void _add_unknown_cpt(BOM_DBS *my_bom, KEY id,unsigned int count);
 int get_product_name(DB *, const DBT *, const DBT *, DBT *);
 int get_cpt_name(DB *, const DBT *, const DBT *, DBT *);
-
-int
-unit_test()
-{
-   DOM_DBS my_dom;
-    int ret,i;
-    unsigned int count = 0;
-    initialize_stockdbs(&my_dom);
-    set_db_filenames(&my_dom);
-    /* Open all databases */
-    ret = databases_setup(&my_dom, "mydb_manager", stderr);
-    if (ret) {
-        fprintf(stderr, "Error opening databases\n");
-        databases_close(&my_dom);
-        return (ret);
-    }
-
-    PRODUCT p1,p2;
-    memset(&p1,0,sizeof(PRODUCT));
-    memset(&p2,0,sizeof(PRODUCT));
-    p1.id = 6;
-    memcpy(p1.data.name, "src",4);
-    memcpy(p2.data.name, "src",4);
-    for( i=0;i<PRODUCT_CPT_NUM;i++)
-    { 
-      p1.data.subcpt[i].num = i;
-      p1.data.subcpt[i].id = i*2;
-    }  
-    printf("Done initialize product.\n");
-    ret = insert_products(&my_dom,&p1);
-    if(ret !=0)
-      printf("error insert\n");
-    else
-      printf("Done insert product.\n");
-    ret = get_product_by_name(&my_dom,&p2);
-    
-    if(ret == DB_NOTFOUND)
-      printf("Key not find\n");
-    else
-      printf("Done get product.\n");
-    print_product(&p2);  
-
-    CPT c1,c2;
-    memset(&c1,0,sizeof(CPT));
-    memset(&c2,0,sizeof(CPT));
-    c1.id = 100;
-    
-    memcpy(c1.data.name,"song",5);
-    memcpy(c2.data.name,"song",5);
-    c1.data.subcpt_num = 5;
-    if(c1.data.subcpt_num!=0)
-      c1.data.subcpt = malloc(sizeof(SUBCPT_DATA) * c1.data.subcpt_num);
-    for(i=0;i<c1.data.subcpt_num;++i){
-      memset(&(c1.data.subcpt[i]),0,sizeof(SUBCPT_DATA));
-      c1.data.subcpt[i].num = i;
-      c1.data.subcpt[i].id =i*22;
-    }
-
-    ret = insert_cpt(&my_dom,&c1);
-    //secure_remove_cpt(&my_dom,100);
-    if(ret ==REDEFINE_CPT)
-      printf("error insert\n");
-    else
-      printf("Done insert cpt.\n");
-    ret = get_cpt_by_name(&my_dom,&c2,&count);
-    printf("count = %d\n",count);
-    if(ret == DB_NOTFOUND)
-      printf("Key not find\n");
-    else{
-      print_cpt(&c2);  
-      printf("Done get cpt.\n");
-    }
-
-    /* close our environment and databases */
-    databases_close(&my_dom);
-
-    printf("Done.\n");
-    return (ret);
-}
+void _print_cpt(BOM_DBS * my_bom, CPT * c);
+void  pack_product(PRODUCT_DATA *p_data,char * dataBuf);
 
 
 /*
@@ -101,11 +24,17 @@ unit_test()
 int
 get_product_name(DB *dbp, const DBT *pkey, const DBT *pdata, DBT *skey)
 {
-    PRODUCT_DATA * product;
-    
-    product = pdata->data;
-    memset(skey, 0, sizeof(DBT));
-    skey->data = product->name;
+    u_int offset;
+
+    dbp = NULL;
+    pkey = NULL;
+
+    offset = sizeof(unsigned int);
+    if (pdata->size < offset)
+      return -1;
+
+    memset(skey,0,sizeof(DBT));
+    skey->data = (u_int8_t *) pdata->data + offset;
     skey->size = (u_int32_t)strlen(skey->data) + 1;
 
     return (0);
@@ -194,14 +123,14 @@ open_database(DB **dbpp, const char *file_name,
 
 /* opens all databases */
 int
-databases_setup(DOM_DBS *my_dom, const char *program_name,
+databases_setup(BOM_DBS *my_bom, const char *program_name,
   FILE *error_file_pointer)
 {
     int ret;
 
     /* Open the product database */
-    ret = open_database(&(my_dom->product_dbp),
-      my_dom->product_db_name,
+    ret = open_database(&(my_bom->product_dbp),
+      my_bom->product_db_name,
       program_name, error_file_pointer,
       PRIMARY_DB);
     if (ret != 0)
@@ -212,8 +141,8 @@ databases_setup(DOM_DBS *my_dom, const char *program_name,
 	return (ret);
 
     /* Open the cpt database */
-    ret = open_database(&(my_dom->cpt_dbp),
-      my_dom->cpt_db_name,
+    ret = open_database(&(my_bom->cpt_dbp),
+      my_bom->cpt_db_name,
       program_name, error_file_pointer,
       PRIMARY_DB);
     if (ret != 0)
@@ -228,8 +157,8 @@ databases_setup(DOM_DBS *my_dom, const char *program_name,
      * index the product names found in the product
      * database.
      */
-    ret = open_database(&(my_dom->product_name_sdbp),
-      my_dom->product_name_db_name,
+    ret = open_database(&(my_bom->product_name_sdbp),
+      my_bom->product_name_db_name,
       program_name, error_file_pointer,
       SECONDARY_DB);
     if (ret != 0)
@@ -244,8 +173,8 @@ databases_setup(DOM_DBS *my_dom, const char *program_name,
      * index the cpt names found in the cpt
      * database.
      */
-  	ret = open_database(&(my_dom->cpt_name_sdbp),
-      my_dom->cpt_name_db_name,
+  	ret = open_database(&(my_bom->cpt_name_sdbp),
+      my_bom->cpt_name_db_name,
       program_name, error_file_pointer,
       SECONDARY_DB);
     if (ret != 0)
@@ -259,10 +188,10 @@ databases_setup(DOM_DBS *my_dom, const char *program_name,
      * Associate the product_name db with its primary db
      * (product db).
      */
-     my_dom->product_dbp->associate(
-       my_dom->product_dbp,    /* Primary db */
+     my_bom->product_dbp->associate(
+       my_bom->product_dbp,    /* Primary db */
        NULL,                       /* txn id */
-       my_dom->product_name_sdbp,    /* Secondary db */
+       my_bom->product_name_sdbp,    /* Secondary db */
        get_product_name,              /* Secondary key creator */
        0);                         /* Flags */
 
@@ -270,10 +199,10 @@ databases_setup(DOM_DBS *my_dom, const char *program_name,
      * Associate the cpt_name db with its primary db
      * (cpt db).
      */
-     my_dom->cpt_dbp->associate(
-       my_dom->cpt_dbp,    /* Primary db */
+     my_bom->cpt_dbp->associate(
+       my_bom->cpt_dbp,    /* Primary db */
        NULL,                       /* txn id */
-       my_dom->cpt_name_sdbp,    /* Secondary db */
+       my_bom->cpt_name_sdbp,    /* Secondary db */
        get_cpt_name,              /* Secondary key creator */
        0);                         /* Flags */
 
@@ -283,37 +212,37 @@ databases_setup(DOM_DBS *my_dom, const char *program_name,
 
 /* Closes all the databases and secondary databases. */
 int
-databases_close(DOM_DBS *my_dom)
+databases_close(BOM_DBS *my_bom)
 {
     int ret;
     /*
      * Note that closing a database automatically flushes its cached data
      * to disk, so no sync is required here.
      */
-    if (my_dom->product_name_sdbp != NULL) {
-	ret = my_dom->product_name_sdbp->close(my_dom->product_name_sdbp, 0);
+    if (my_bom->product_name_sdbp != NULL) {
+	ret = my_bom->product_name_sdbp->close(my_bom->product_name_sdbp, 0);
 	if (ret != 0)
 	    fprintf(stderr, "product name database close failed: %s\n",
 	      db_strerror(ret));
     }
 
-    if (my_dom->product_dbp != NULL) {
-	ret = my_dom->product_dbp->close(my_dom->product_dbp, 0);
+    if (my_bom->product_dbp != NULL) {
+	ret = my_bom->product_dbp->close(my_bom->product_dbp, 0);
 	if (ret != 0)
 	    fprintf(stderr, "product database close failed: %s\n",
 	      db_strerror(ret));
     }
 
-     if (my_dom->cpt_name_sdbp != NULL) {
-	ret = my_dom->cpt_name_sdbp->close(my_dom->cpt_name_sdbp, 0);
+     if (my_bom->cpt_name_sdbp != NULL) {
+	ret = my_bom->cpt_name_sdbp->close(my_bom->cpt_name_sdbp, 0);
 	if (ret != 0)
 	    fprintf(stderr, "cpt name database close failed: %s\n",
 	      db_strerror(ret));
     }
 
 
-    if (my_dom->cpt_dbp != NULL) {
-	ret = my_dom->cpt_dbp->close(my_dom->cpt_dbp, 0);
+    if (my_bom->cpt_dbp != NULL) {
+	ret = my_bom->cpt_dbp->close(my_bom->cpt_dbp, 0);
 	if (ret != 0)
 	    fprintf(stderr, "cpt database close failed: %s\n",
 	      db_strerror(ret));
@@ -325,50 +254,50 @@ databases_close(DOM_DBS *my_dom)
 
 /* Identify all the files that will hold our databases. */
 void
-set_db_filenames(DOM_DBS *my_dom)
+set_db_filenames(BOM_DBS *my_bom)
 {
     size_t size;
 
     /* Create the product DB file name */
-    size = strlen(my_dom->db_home_dir) + strlen(PRODUCTDB) + 1;
-    my_dom->product_db_name = malloc(size);
-    snprintf(my_dom->product_db_name, size, "%s%s",
-      my_dom->db_home_dir, PRODUCTDB);
+    size = strlen(my_bom->db_home_dir) + strlen(PRODUCTDB) + 1;
+    my_bom->product_db_name = malloc(size);
+    snprintf(my_bom->product_db_name, size, "%s%s",
+      my_bom->db_home_dir, PRODUCTDB);
 
     /* Create the cpt DB file name */
-    size = strlen(my_dom->db_home_dir) + strlen(CPTDB) + 1;
-    my_dom->cpt_db_name = malloc(size);
-    snprintf(my_dom->cpt_db_name, size, "%s%s",
-      my_dom->db_home_dir, CPTDB);
+    size = strlen(my_bom->db_home_dir) + strlen(CPTDB) + 1;
+    my_bom->cpt_db_name = malloc(size);
+    snprintf(my_bom->cpt_db_name, size, "%s%s",
+      my_bom->db_home_dir, CPTDB);
 
     /* Create the product name DB file name */
-    size = strlen(my_dom->db_home_dir) + strlen(PRODUCTNAMEDB) + 1;
-    my_dom->product_name_db_name = malloc(size);
-    snprintf(my_dom->product_name_db_name, size, "%s%s",
-      my_dom->db_home_dir, PRODUCTNAMEDB);
+    size = strlen(my_bom->db_home_dir) + strlen(PRODUCTNAMEDB) + 1;
+    my_bom->product_name_db_name = malloc(size);
+    snprintf(my_bom->product_name_db_name, size, "%s%s",
+      my_bom->db_home_dir, PRODUCTNAMEDB);
 
     /* Create the cpt name DB file name */
-    size = strlen(my_dom->db_home_dir) + strlen(CPTNAMEDB) + 1;
-    my_dom->cpt_name_db_name = malloc(size);
-    snprintf(my_dom->cpt_name_db_name, size, "%s%s",
-      my_dom->db_home_dir, CPTNAMEDB);
+    size = strlen(my_bom->db_home_dir) + strlen(CPTNAMEDB) + 1;
+    my_bom->cpt_name_db_name = malloc(size);
+    snprintf(my_bom->cpt_name_db_name, size, "%s%s",
+      my_bom->db_home_dir, CPTNAMEDB);
 
 }
 
-/* Initializes the DOM_DBS struct.*/
+/* Initializes the BOM_DBS struct.*/
 void
-initialize_stockdbs(DOM_DBS *my_dom)
+initialize_stockdbs(BOM_DBS *my_bom)
 {
-    my_dom->db_home_dir = DEFAULT_HOMEDIR;
-    my_dom->product_dbp = NULL;
-    my_dom->cpt_dbp = NULL;
-    my_dom->product_name_sdbp = NULL;
-    my_dom->cpt_name_sdbp = NULL;
+    my_bom->db_home_dir = DEFAULT_HOMEDIR;
+    my_bom->product_dbp = NULL;
+    my_bom->cpt_dbp = NULL;
+    my_bom->product_name_sdbp = NULL;
+    my_bom->cpt_name_sdbp = NULL;
     
-    my_dom->product_db_name = NULL;
-    my_dom->cpt_db_name = NULL;
-    my_dom->product_name_db_name = NULL;
-	  my_dom->product_name_db_name = NULL;
+    my_bom->product_db_name = NULL;
+    my_bom->cpt_db_name = NULL;
+    my_bom->product_name_db_name = NULL;
+	  my_bom->product_name_db_name = NULL;
 }
 
 /*
@@ -389,39 +318,39 @@ pack_string(char *buffer, char *string, size_t start_pos)
 }
 
 int 
-insert_products(DOM_DBS *my_dom, PRODUCT *p)
+insert_product(BOM_DBS *my_bom, PRODUCT *p)
 {
   CPT tmp;
   int i,count=0;
-  for(i=0;i<PRODUCT_CPT_NUM;i++){
+  for(i=0;i<p->data.subcpt_num;i++){
     memset(&tmp,0,sizeof(CPT));
     tmp.id = p->data.subcpt[i].id;
-    if(get_cpt_by_id(my_dom,&tmp,&count) == DB_NOTFOUND)
-      _add_unknown_cpt(my_dom,p->data.subcpt[i].id,1);
+    if(get_cpt_by_id(my_bom,&tmp,&count) == DB_NOTFOUND)
+      _add_unknown_cpt(my_bom,p->data.subcpt[i].id,1);
     else{
-      _modify_reference(my_dom,p->data.subcpt[i].id,ADD_REF);
+      _modify_reference(my_bom,p->data.subcpt[i].id,ADD_REF);
       if(tmp.data.subcpt!=NULL)
         free(tmp.data.subcpt);
     }
   }
-  return _insert_products(my_dom,p);
+  return _insert_product(my_bom,p);
 }
 int 
-_modify_reference(DOM_DBS *my_dom, KEY id,unsigned int flags){
+_modify_reference(BOM_DBS *my_bom, KEY id,unsigned int flags){
   CPT tmp;
   int count,ret = 0;
   tmp.id = id;
-  get_cpt_by_id(my_dom,&tmp,&count);
+  get_cpt_by_id(my_bom,&tmp,&count);
 
   switch(flags){
     case RED_REF:
-      _remove_cpt(my_dom,id);
+      _remove_cpt(my_bom,id);
       if(count != 1)
-        _insert_cpt(my_dom,&tmp,count-1);
+        _insert_cpt(my_bom,&tmp,count-1);
       break;
     case ADD_REF:
-      _remove_cpt(my_dom,id);
-      _insert_cpt(my_dom,&tmp,count+1);
+      _remove_cpt(my_bom,id);
+      _insert_cpt(my_bom,&tmp,count+1);
       break;
     default:
       ret = -1;
@@ -432,39 +361,39 @@ _modify_reference(DOM_DBS *my_dom, KEY id,unsigned int flags){
 }
 
 int
-_remove_product(DOM_DBS *my_dom, KEY id){
+_remove_product(BOM_DBS *my_bom, KEY id){
   DBT key; 
   memset(&key, 0, sizeof(DBT));
   key.data = &id; 
   key.size = sizeof(KEY);
-  return my_dom->product_dbp->del(my_dom->product_dbp, NULL, &key, 0);
+  return my_bom->product_dbp->del(my_bom->product_dbp, NULL, &key, 0);
 }
 
 int
-_remove_cpt(DOM_DBS *my_dom, KEY id){
+_remove_cpt(BOM_DBS *my_bom, KEY id){
   DBT key; 
   memset(&key, 0, sizeof(DBT));
   key.data = &id; 
   key.size = sizeof(KEY);
-  return my_dom->cpt_dbp->del(my_dom->cpt_dbp, NULL, &key, 0);
+  return my_bom->cpt_dbp->del(my_bom->cpt_dbp, NULL, &key, 0);
 }
 
 int 
-insert_cpt(DOM_DBS *my_dom,  CPT *c)
+insert_cpt(BOM_DBS *my_bom,  CPT *c)
 {
   CPT tmp;
   int i,count = 0;
   size_t ret;
   memset(&tmp,0,sizeof(CPT));
   tmp.id = c->id;
-  ret = get_cpt_by_id(my_dom,&tmp,&count);
+  ret = get_cpt_by_id(my_bom,&tmp,&count);
   if(ret ==DB_NOTFOUND){
-    _insert_cpt(my_dom,c,0);
+    _insert_cpt(my_bom,c,0);
   }
   else{
     if(strcmp(tmp.data.name,"unknown")==0){
-      _remove_cpt(my_dom,tmp.id);
-      _insert_cpt(my_dom,c,count);
+      _remove_cpt(my_bom,tmp.id);
+      _insert_cpt(my_bom,c,count);
     }else
       return REDEFINE_CPT;
   }
@@ -472,10 +401,10 @@ insert_cpt(DOM_DBS *my_dom,  CPT *c)
   for(i=0;i<c->data.subcpt_num;i++){
     memset(&tmp,0,sizeof(CPT));
     tmp.id = c->data.subcpt[i].id;
-    if(get_cpt_by_id(my_dom,&tmp,&count) == DB_NOTFOUND)
-      _add_unknown_cpt(my_dom,c->data.subcpt[i].id,1);
+    if(get_cpt_by_id(my_bom,&tmp,&count) == DB_NOTFOUND)
+      _add_unknown_cpt(my_bom,c->data.subcpt[i].id,1);
     else{
-      _modify_reference(my_dom,tmp.id,ADD_REF);
+      _modify_reference(my_bom,tmp.id,ADD_REF);
       if(tmp.data.subcpt!=NULL)
         free(tmp.data.subcpt);
     }
@@ -484,23 +413,45 @@ insert_cpt(DOM_DBS *my_dom,  CPT *c)
 }
 
 int 
-_insert_products(DOM_DBS *my_dom, PRODUCT *p)
+_insert_product(BOM_DBS *my_bom, PRODUCT *p)
 {
   int ret;
-  DBT key, data;
+  DBT key,data;
+  char dataBuf[MAXDATABUF];
+  size_t bufLen, dataLen,i;
+  memset(dataBuf, 0, MAXDATABUF);
+
+  bufLen = 0;
+  dataLen = 0;
+
+  dataLen = sizeof(unsigned int);
+  memcpy(dataBuf+bufLen, &(p->data.subcpt_num), dataLen);
+  bufLen += dataLen;
+
+  bufLen = pack_string(dataBuf, p->data.name, bufLen);
+
+  for(i = 0;i < p->data.subcpt_num; i++){
+    dataLen = sizeof(SUBCPT_DATA);
+    memcpy(dataBuf+bufLen, &(p->data.subcpt[i]), dataLen);
+    bufLen += dataLen;
+  }
+
   memset(&key, 0, sizeof(DBT));
   memset(&data, 0, sizeof(DBT));
-  key.data = &p->id;
+
+  key.data = &(p->id);
   key.size = sizeof(KEY);
 
-  data.data = &p->data;
-  data.size = sizeof(PRODUCT_DATA);
+  /* The data is the information that we packed into dataBuf. */
+  data.data = dataBuf;
+  data.size = (u_int32_t)bufLen;
 
-  return my_dom->product_dbp->put(my_dom->product_dbp,0,&key,&data,0);
+  /* Put the data into the database */
+  return my_bom->product_dbp->put(my_bom->product_dbp, 0, &key, &data, 0); 
 }
 
 int 
-_insert_cpt(DOM_DBS *my_dom, CPT *c, unsigned int count)
+_insert_cpt(BOM_DBS *my_bom, CPT *c, unsigned int count)
 {
   int ret;
   DBT key,data;
@@ -520,6 +471,7 @@ _insert_cpt(DOM_DBS *my_dom, CPT *c, unsigned int count)
   bufLen += dataLen;
 
   bufLen = pack_string(dataBuf, c->data.name, bufLen);
+  bufLen = pack_string(dataBuf, c->data.model, bufLen);
 
   for(i = 0;i < c->data.subcpt_num; i++){
     dataLen = sizeof(SUBCPT_DATA);
@@ -538,51 +490,57 @@ _insert_cpt(DOM_DBS *my_dom, CPT *c, unsigned int count)
   data.size = (u_int32_t)bufLen;
 
   /* Put the data into the database */
-  return my_dom->cpt_dbp->put(my_dom->cpt_dbp, 0, &key, &data, 0); 
+  return my_bom->cpt_dbp->put(my_bom->cpt_dbp, 0, &key, &data, 0); 
 }
 
 int 
-get_product_by_id(DOM_DBS *my_dom,PRODUCT *p)
+get_product_by_id(BOM_DBS *my_bom,PRODUCT *p)
 {
+
   DBT key, data;
   int ret;
+  char dataBuf[MAXDATABUF];
+  memset(dataBuf, 0, MAXDATABUF);
   memset(&key, 0, sizeof(DBT));
   memset(&data, 0, sizeof(DBT));
-  key.data = &p->id;
+  key.data = &(p->id);
   key.size = sizeof(KEY);
-
-  data.data = &(p->data);
-  data.ulen = sizeof(PRODUCT_DATA);
+  data.data = dataBuf;
+  data.ulen = MAXDATABUF;
   data.flags = DB_DBT_USERMEM;
-  ret = my_dom->product_dbp->get(my_dom->product_dbp,NULL,&key,&data,0);
+  ret = my_bom->product_dbp->get(my_bom->product_dbp,NULL,&key,&data,0);
+  if(ret == 0)
+    pack_product(&(p->data),dataBuf);
   return ret;
 }
 
 int 
-get_product_by_name(DOM_DBS *my_dom,PRODUCT *p)
+get_product_by_name(BOM_DBS *my_bom,PRODUCT *p)
 {
-
   DBT key, pkey,pdata;
   int ret;
-  memset(&key, 0, sizeof(DBT)); 
-  memset(&pkey, 0, sizeof(DBT)); 
+  char dataBuf[MAXDATABUF];
+  memset(dataBuf, 0, MAXDATABUF);
+  memset(&key, 0, sizeof(DBT));
   memset(&pdata, 0, sizeof(DBT));
-
+  memset(&pkey, 0, sizeof(DBT));
   key.data = p->data.name;
   key.size = strlen(p->data.name)+1;
-  pdata.data = &(p->data);
-  pdata.ulen = sizeof(PRODUCT_DATA);
+  pdata.data = dataBuf;
+  pdata.ulen = MAXDATABUF;
   pdata.flags = DB_DBT_USERMEM;
-
-  ret = my_dom->product_name_sdbp->pget(my_dom->product_name_sdbp,NULL,\
+  ret = my_bom->product_name_sdbp->pget(my_bom->product_name_sdbp,NULL,\
     &key,&pkey,&pdata,0);
-  p->id = *(KEY*)pkey.data;
+  if(ret == 0){
+    p->id = *(KEY*)pkey.data;
+    pack_product(&(p->data),dataBuf);
+  }
   return ret;
 }
 
 
 int 
-get_cpt_by_id(DOM_DBS *my_dom,CPT *c,unsigned int * count)
+get_cpt_by_id(BOM_DBS *my_bom,CPT *c,unsigned int * count)
 {
   DBT key, data;
   int ret;
@@ -595,14 +553,14 @@ get_cpt_by_id(DOM_DBS *my_dom,CPT *c,unsigned int * count)
   data.data = dataBuf;
   data.ulen = MAXDATABUF;
   data.flags = DB_DBT_USERMEM;
-  ret = my_dom->cpt_dbp->get(my_dom->cpt_dbp,NULL,&key,&data,0);
+  ret = my_bom->cpt_dbp->get(my_bom->cpt_dbp,NULL,&key,&data,0);
   if(ret == 0)
     pack_cpt(&(c->data),dataBuf,count);
   return ret;
 }
 
 int 
-get_cpt_by_name(DOM_DBS *my_dom,CPT *c,unsigned int * count)
+get_cpt_by_name(BOM_DBS *my_bom,CPT *c,unsigned int * count)
 {
   DBT key, pkey,pdata;
   int ret;
@@ -616,7 +574,7 @@ get_cpt_by_name(DOM_DBS *my_dom,CPT *c,unsigned int * count)
   pdata.data = dataBuf;
   pdata.ulen = MAXDATABUF;
   pdata.flags = DB_DBT_USERMEM;
-  ret = my_dom->cpt_name_sdbp->pget(my_dom->cpt_name_sdbp,NULL,\
+  ret = my_bom->cpt_name_sdbp->pget(my_bom->cpt_name_sdbp,NULL,\
     &key,&pkey,&pdata,0);
   if(ret == 0){
     c->id = *(KEY*)pkey.data;
@@ -638,79 +596,94 @@ pack_cpt(CPT_DATA *c_data,char * dataBuf,unsigned int *count)
   buf_pos += sizeof(unsigned int);
   memcpy(c_data->name,dataBuf + buf_pos,strlen(dataBuf + buf_pos)+1);
   buf_pos +=strlen(c_data->name) + 1;
-  c_data->subcpt= malloc(sizeof(SUBCPT_DATA) * c_data->subcpt_num);
+  memcpy(c_data->model,dataBuf + buf_pos,strlen(dataBuf + buf_pos)+1);
+  buf_pos +=strlen(c_data->model) + 1;  
+  c_data->subcpt= calloc( c_data->subcpt_num,sizeof(SUBCPT_DATA) );
   for(i = 0; i < c_data->subcpt_num; i++){
     c_data->subcpt[i] = *((SUBCPT_DATA *)(dataBuf + buf_pos));
     buf_pos += sizeof(SUBCPT_DATA);
   }
 }
+
+void 
+pack_product(PRODUCT_DATA *p_data,char * dataBuf)
+{
+  size_t buf_pos;
+  int i;
+  p_data->subcpt_num = *((unsigned int *)(dataBuf));
+  buf_pos = sizeof(unsigned int);
+  memcpy(p_data->name,dataBuf + buf_pos,strlen(dataBuf + buf_pos)+1);
+  buf_pos +=strlen(p_data->name) + 1; 
+  p_data->subcpt= calloc( p_data->subcpt_num,sizeof(SUBCPT_DATA));
+  for(i = 0; i < p_data->subcpt_num; i++){
+    p_data->subcpt[i] = *((SUBCPT_DATA *)(dataBuf + buf_pos));
+    buf_pos += sizeof(SUBCPT_DATA);
+  }
+}
+
+
 int 
-secure_remove_product(DOM_DBS *my_dom,KEY id)
+secure_remove_product(BOM_DBS *my_bom,KEY id)
 {
   int i,ret;
   PRODUCT tmp;
   tmp.id = id;
-  ret = get_product_by_id(my_dom,&tmp);
+  ret = get_product_by_id(my_bom,&tmp);
   if (ret == DB_NOTFOUND)
     return ret;
   else{
-    for(i=0;i<PRODUCT_CPT_NUM;i++)
-      _modify_reference(my_dom,tmp.data.subcpt[i].id,RED_REF);
-    return _remove_product(my_dom,id);
+    for(i=0;i<tmp.data.subcpt_num;i++)
+      _modify_reference(my_bom,tmp.data.subcpt[i].id,RED_REF);
+    return _remove_product(my_bom,id);
   }
 }
 
 int 
-secure_remove_cpt(DOM_DBS *my_dom,KEY id)
+secure_remove_cpt(BOM_DBS *my_bom,KEY id)
 {
   int i,count,ret;
   CPT tmp;
   tmp.id = id;
-  ret = get_cpt_by_id(my_dom,&tmp,&count);
+  ret = get_cpt_by_id(my_bom,&tmp,&count);
   if (ret == DB_NOTFOUND)
     return ret;
   else{
     for(i=0;i<tmp.data.subcpt_num;i++){
-      _modify_reference(my_dom,tmp.data.subcpt[i].id,RED_REF);
+      _modify_reference(my_bom,tmp.data.subcpt[i].id,RED_REF);
     }
     if (count != 0)
-      _add_unknown_cpt(my_dom,id,count);
+      _add_unknown_cpt(my_bom,id,count);
     if(tmp.data.subcpt!=NULL)
       free(tmp.data.subcpt);
-    return _remove_cpt(my_dom,id);
+    return _remove_cpt(my_bom,id);
   }
 }
 
 void 
-_add_unknown_cpt(DOM_DBS *my_dom, KEY id,unsigned int count){
+_add_unknown_cpt(BOM_DBS *my_bom, KEY id,unsigned int count){
   CPT tmp;
   tmp.id = id;
   strcpy(tmp.data.name,"unknown");
-  _insert_cpt(my_dom,&tmp,count);
+  _insert_cpt(my_bom,&tmp,count);
 }
 
 
 void 
-print_product(PRODUCT *p)
+print_product_raw(PRODUCT *p)
 {
   printf("=============================\n");
   PRODUCT_DATA *p_data = &(p->data);
   printf("p id:%d\n",p->id);
-  printf("pname:%s\nid:%d\tnum:%d\nid:%d\tnum:%d\nid:%d\tnum:%d\nid:%d\tnum:%d\n",\
-    p_data->name,\
-    p_data->subcpt[0].id,\
-    p_data->subcpt[0].num,\
-    p_data->subcpt[1].id,\
-    p_data->subcpt[1].num,\
-    p_data->subcpt[2].id,\
-    p_data->subcpt[2].num,\
-    p_data->subcpt[3].id,\
-    p_data->subcpt[3].num);
+  int i;
+  printf("productname:%s, has %d subcpt\n",p_data->name,p_data->subcpt_num);
+  for(i = 0; i < p_data->subcpt_num; i++){
+    printf("num:%d\tid:%d\n",p_data->subcpt[i].num,p_data->subcpt[i].id);
+  }
   printf("=============================\n");
 }
 
 void 
-print_cpt(CPT * c)
+print_cpt_raw(CPT * c)
 {
   printf("=============================\n");
   CPT_DATA *c_data = &(c->data);
@@ -721,4 +694,151 @@ print_cpt(CPT * c)
     printf("num:%d\tid:%d\n",c_data->subcpt[i].num,c_data->subcpt[i].id);
   }
   printf("=============================\n");
+}
+
+void 
+print_cpt(BOM_DBS * my_bom, CPT * c)
+{
+  printf("===============================================================\n");
+  _print_cpt(my_bom,c);
+  printf("===============================================================\n");
+}
+
+void 
+_print_cpt(BOM_DBS * my_bom, CPT * c)
+{
+  int i,count;
+  CPT tmp;
+  printf("Componant id: \"%d\", name: \"%s\", model: \"%s\", has \"%d\" subcomponants\n",\
+    c->id,\
+    c->data.name,\
+    c->data.model,\
+    c->data.subcpt_num);
+  for(i = 0; i < c->data.subcpt_num; i++)
+  {
+    printf("\ttotal number: \"%d\", ",c->data.subcpt[i].num);
+    memset(&tmp,0,sizeof(CPT));
+    tmp.id = c->data.subcpt[i].id;
+    get_cpt_by_id(my_bom,&tmp,&count);
+    _print_cpt(my_bom,&tmp);
+    if(tmp.data.subcpt!=NULL)
+      free(tmp.data.subcpt);
+  }
+}
+
+void 
+print_product(BOM_DBS * my_bom, PRODUCT *p)
+{
+  printf("===============================================================\n");
+  int i,count;
+  CPT tmp;
+  printf("Product id: \"%d\", name: \"%s\", has \"%d\" subcomponants\n",\
+    p->id,\
+    p->data.name,\
+    p->data.subcpt_num);
+  for(i = 0; i < p->data.subcpt_num; i++)
+  {
+    printf("\ttotal number \"%d\", ",p->data.subcpt[i].num);
+    memset(&tmp,0,sizeof(CPT));
+    tmp.id = p->data.subcpt[i].id;
+    get_cpt_by_id(my_bom,&tmp,&count);
+    _print_cpt(my_bom,&tmp);
+    if(tmp.data.subcpt!=NULL)
+      free(tmp.data.subcpt);
+  }
+  printf("===============================================================\n");
+}
+
+int print_products(BOM_DBS * my_bom,unsigned int limit)
+{
+    DBC *product_cursorp;
+    DBT key, data;
+    PRODUCT p;
+    int exit_value, ret;
+
+    /* Initialize our DBTs. */
+    memset(&key, 0, sizeof(DBT));
+    memset(&data, 0, sizeof(DBT));
+
+    /* Get a cursor to the inventory db */
+    my_bom->product_dbp->cursor(my_bom->product_dbp, NULL,
+      &product_cursorp, 0);
+
+    /*
+     * Iterate over the inventory database, from the first record
+     * to the last, displaying each in turn.
+     */
+    exit_value = 0;
+    if( limit==-1)
+        limit =999;
+    while ((ret = product_cursorp->get(product_cursorp, &key, &data, DB_NEXT)) == 0 && limit>0){
+        limit--;
+        memset(&p,0,sizeof(PRODUCT));
+        if(ret == 0)
+          pack_product(&(p.data),data.data);
+        p.id = *((KEY *)key.data);
+        
+        print_product_raw(&p);
+        printf("\n");
+        if(p.data.subcpt!=NULL)
+        {
+          free(p.data.subcpt);
+          p.data.subcpt=NULL;
+        }
+        if (ret) {
+            exit_value = ret;
+            break;
+        }
+    }
+    /* Close the cursor */
+    product_cursorp->close(product_cursorp);
+    return (exit_value);
+}
+
+
+int print_cpts(BOM_DBS * my_bom,int flag,unsigned int limit)
+{
+    DBC *cpt_cursorp;
+    DBT key, data;
+    CPT c;
+    int exit_value, ret,count;
+
+    /* Initialize our DBTs. */
+    memset(&key, 0, sizeof(DBT));
+    memset(&data, 0, sizeof(DBT));
+
+    /* Get a cursor to the inventory db */
+    my_bom->cpt_dbp->cursor(my_bom->cpt_dbp, NULL,
+      &cpt_cursorp, 0);
+
+    /*
+     * Iterate over the inventory database, from the first record
+     * to the last, displaying each in turn.
+     */
+    exit_value = 0;
+    if( limit==-1)
+        limit =999;
+    while ((ret = cpt_cursorp->get(cpt_cursorp, &key, &data, DB_NEXT)) == 0 && limit>0){
+        limit--;
+        memset(&c,0,sizeof(CPT));
+        if(ret == 0)
+          pack_cpt(&(c.data),data.data,&count);
+        c.id = *((KEY *)key.data);
+        if(flag==SHADOW_UNKNOWN && strcmp(c.data.name,"unknown")!=0){
+          print_cpt_raw(&c);
+          printf("\n");
+        }
+        if(c.data.subcpt!=NULL)
+        {
+          free(c.data.subcpt);
+          c.data.subcpt=NULL;
+        }
+        if (ret) {
+            exit_value = ret;
+            break;
+        }
+    }
+    /* Close the cursor */
+    cpt_cursorp->close(cpt_cursorp);
+    return (exit_value);
 }
