@@ -675,7 +675,7 @@ print_product_raw(PRODUCT *p)
   PRODUCT_DATA *p_data = &(p->data);
   printf("p id:%d\n",p->id);
   int i;
-  printf("productname:%s, has %d subcpt\n",p_data->name,p_data->subcpt_num);
+  printf("product name:%s, has %d subcomponants\n",p_data->name,p_data->subcpt_num);
   for(i = 0; i < p_data->subcpt_num; i++){
     printf("num:%d\tid:%d\n",p_data->subcpt[i].num,p_data->subcpt[i].id);
   }
@@ -689,7 +689,7 @@ print_cpt_raw(CPT * c)
   CPT_DATA *c_data = &(c->data);
   printf("c id:%d\n",c->id);
   int i;
-  printf("cptname:%s, has %d subcpt\n",c_data->name,c_data->subcpt_num);
+  printf("Componant name:%s, has %d subcomponants\n",c_data->name,c_data->subcpt_num);
   for(i = 0; i < c_data->subcpt_num; i++){
     printf("num:%d\tid:%d\n",c_data->subcpt[i].num,c_data->subcpt[i].id);
   }

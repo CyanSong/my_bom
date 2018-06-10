@@ -14,8 +14,7 @@ usage()
         u for update\n\
         q for query\n\
         o for quit\n\
-        s for show all records\n\
-        EOF for quit\n");
+        s for show all records\n");
 }
        
 BOM_DBS my_bom;
@@ -41,6 +40,9 @@ void update_interface();
 void insert_interface();
 void remove_interface();
 void query_interface();
+void print_many_interface();
+void random_add_interface();
+
 static void my_read_string(char *str,unsigned int len);
 
 int main(){
@@ -62,8 +64,7 @@ user_interface()
         
         switch(cmd){
             case 'a':
-                add_random_cpt(100,5);
-                add_random_product(10);   
+                random_add_interface();   
                 break;
             case 'i':
                 insert_interface();
@@ -78,8 +79,7 @@ user_interface()
                 update_interface();
                 break;
             case 's':
-                print_products(&my_bom,-1);
-                print_cpts(&my_bom,SHADOW_UNKNOWN,-1 );
+                print_many_interface();
                 break;
             case 'o':
                 return ;
@@ -90,6 +90,38 @@ user_interface()
     }
 }
 
+void print_many_interface()
+{
+    char cmd;
+    printf("Show all products:1, show all components:2, show all:3\n");
+    while((cmd=getchar()) == '\n'){}
+    switch(cmd){
+        case '1':
+            print_products(&my_bom,-1);
+            break;
+        case '2':
+            print_cpts(&my_bom,SHADOW_UNKNOWN,-1);
+            break;
+        case '3':
+            print_products(&my_bom,-1);
+            print_cpts(&my_bom,SHADOW_UNKNOWN,-1);
+            break;
+        default:
+            printf("wrong command!\n");
+            break;
+    }
+}
+
+void random_add_interface()
+{
+    unsigned int num;
+    printf("how many products do you want to add?\n");
+    scanf("%d",&num);
+    add_random_product(num);
+    printf("how many components do you want to add?\n");
+    scanf("%d",&num);
+    add_random_cpt(num,num/20+1);
+}
 void insert_interface()
 {
     unsigned int num,i;
